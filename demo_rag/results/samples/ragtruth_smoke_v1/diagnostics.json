@@ -1,0 +1,60 @@
+{
+  "analysis": "ragtruth-smoke-v1-frozen-error-analysis",
+  "scope": "Observable diagnostic signals over frozen stage-3 results; counts are not proven causal attribution.",
+  "response_count": 50,
+  "claim_count": 495,
+  "error_claim_count": 305,
+  "outcome_state_counts": {
+    "false_negative": {
+      "SUPPORTED": 3
+    },
+    "false_positive": {
+      "CONFLICTING_EVIDENCE": 15,
+      "CONTRADICTED": 49,
+      "INSUFFICIENT_EVIDENCE": 238
+    },
+    "true_negative": {
+      "SUPPORTED": 122
+    },
+    "true_positive": {
+      "CONFLICTING_EVIDENCE": 1,
+      "CONTRADICTED": 10,
+      "INSUFFICIENT_EVIDENCE": 57
+    }
+  },
+  "error_signal_counts": {
+    "max_support_between_0.5_and_0.8": 34,
+    "multiple_clause_markers": 78,
+    "some_selected_pairs_exceed_256_tokens": 1,
+    "zero_evidence_edges": 44
+  },
+  "false_positive_edge_count_distribution": {
+    "0": 44,
+    "1": 54,
+    "2": 77,
+    "3": 127
+  },
+  "false_negative_label_type_counts": {
+    "Evident Baseless Info": 3
+  },
+  "manual_review": {
+    "count": 23,
+    "primary_observation_layer_counts": {
+      "aggregation_over_irrelevant_evidence": 2,
+      "benchmark_scope_mismatch": 1,
+      "checkability": 2,
+      "claim_decomposition": 5,
+      "control_correct_detection": 2,
+      "control_correct_release": 4,
+      "multi_evidence_or_inference": 2,
+      "nli_or_claim_detail_mismatch": 1,
+      "nli_semantic_failure": 1,
+      "span_to_claim_label_bleed": 2,
+      "upstream_label_inconsistency": 1
+    },
+    "confidence_counts": {
+      "high": 21,
+      "medium": 2
+    }
+  }
+}

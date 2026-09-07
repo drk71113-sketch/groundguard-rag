@@ -1,0 +1,2 @@
+{"case_id":"demo-supported","request":{"request_id":"demo-supported","answer":"Paris is in France.","chunks":[{"chunk_id":"evidence-1","text":"Paris is in France."}]},"expected_states":["SUPPORTED"]}
+{"case_id":"demo-insufficient","request":{"request_id":"demo-insufficient","answer":"Mars has two moons.","chunks":[{"chunk_id":"evidence-2","text":"Mars has one moon."}]},"expected_states":["INSUFFICIENT_EVIDENCE"]}

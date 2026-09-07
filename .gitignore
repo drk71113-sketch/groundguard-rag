@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Local secrets and machine-specific configuration.
+.env
+.env.*
+!.env.example
+
+# Collaboration-private sessions, checkpoints, snapshots, and review bundles.
+project_meta/codex_storage/
+project_meta/claude_storage/
+
+# Model weights and local model caches must not be committed.
+models/
+checkpoints/
+*.safetensors
+pytorch_model*.bin
+model*.onnx
+
+# RAGTruth source data is downloaded locally; keep only its license/source note.
+demo_rag/data/raw/ragtruth/*.jsonl

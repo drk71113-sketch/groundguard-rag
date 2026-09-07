@@ -1,0 +1,68 @@
+[project]
+name = "groundguard-rag"
+version = "0.1.0"
+description = "Pluggable RAG fact-verification and bounded self-healing middleware"
+readme = "README.md"
+requires-python = ">=3.10"
+# The core remains dependency-free. Provider runtimes are explicit extras so
+# importing the domain/application layers never pulls model frameworks in.
+dependencies = []
+
+[project.optional-dependencies]
+# rfc3339-validator is required for jsonschema's FormatChecker to actually
+# validate "date-time" format -- without it, the checker silently accepts
+# any string (see test_schema.py's use of FormatChecker).
+test = [
+    "build>=1.2,<2",
+    "jsonschema>=4,<5",
+    "pytest>=7,<10",
+    "pytest-cov>=5,<8",
+    "rfc3339-validator>=0.1,<1",
+    "ruff>=0.16,<1",
+]
+# Optional stage-5 provider runtime. Tests use injected fakes and never download
+# a checkpoint, so contributors do not need this extra for the default suite.
+nli-transformers = ["torch>=2,<3", "transformers>=4.36,<6"]
+# The MCP SDK is protocol glue only and is never imported from the package root.
+mcp = ["mcp>=1.26,<3"]
+
+[project.scripts]
+groundguard-rag-mcp = "groundguard_rag.integrations.mcp_cli:main"
+groundguard-rag-eval = "groundguard_rag.evaluation.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+groundguard_rag = ["schema/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "demo_rag/tests"]
+markers = [
+    "real_model: opt-in integration tests that require cached provider weights",
+]
+# Adds src/ to sys.path so tests import the package without an editable
+# install step; keeps stage 0 runnable with just `pip install -e .[test]`
+# or nothing at all beyond the test extras.
+pythonpath = ["src", "."]
+
+[tool.coverage.run]
+branch = true
+source = ["groundguard_rag"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+# Start CI with correctness/import errors. Historical style modernization is
+# deliberately separate from release hardening and must not obscure behavior.
+select = ["E4", "E7", "E9", "F"]

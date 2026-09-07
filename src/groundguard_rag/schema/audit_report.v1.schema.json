@@ -1,0 +1,433 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://groundguard-rag.dev/schema/audit_report.v1.schema.json",
+  "title": "GroundGuard-RAG Audit Report",
+  "description": "Versioned, machine-readable audit report produced by AuditReport.to_dict(). schema_version is locked to the exact current value; see groundguard_rag.domain.models.SCHEMA_VERSION. run_mode <-> repair-field consistency (VERIFY implies no repair activity; HEAL requires a non-empty stop_reason) is enforced below via if/then. Comparisons this schema cannot express (e.g. end_char > start_char, repair_actions[].round <= repair_rounds, cross-object claim_id references, duplicate-edge detection, LabelScores probabilities summing to 1, NaN/Infinity rejection) are checked separately by groundguard_rag.schema.semantic_validation.validate_audit_report_semantics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "input_hash",
+    "model_revision",
+    "threshold_version",
+    "created_at",
+    "run_mode",
+    "verdicts",
+    "repair_rounds",
+    "repair_actions",
+    "stop_reason",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.1.0",
+      "description": "Locked to the exact current schema version -- a pattern alone would accept any drifted value."
+    },
+    "request_id": { "type": "string", "minLength": 1 },
+    "input_hash": { "type": "string", "minLength": 1 },
+    "model_revision": { "type": "string", "minLength": 1 },
+    "threshold_version": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "run_mode": { "type": "string", "enum": ["VERIFY", "HEAL"] },
+    "verdicts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claimVerdict" }
+    },
+    "initial_verdicts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claimVerdict" },
+      "description": "Initial verification snapshot for HEAL claim lineage; empty for VERIFY."
+    },
+    "calibrator_id": { "type": ["string", "null"], "minLength": 1 },
+    "calibrator_revision": { "type": ["string", "null"], "minLength": 1 },
+    "heal_progress_calibrator_id": { "type": ["string", "null"], "minLength": 1 },
+    "heal_progress_calibrator_revision": { "type": ["string", "null"], "minLength": 1 },
+    "repair_rounds": { "type": "integer", "minimum": 0 },
+    "repair_actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/repairActionRecord" }
+    },
+    "stop_reason": {
+      "type": ["string", "null"]
+    },
+    "metrics": { "$ref": "#/$defs/runMetrics" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["run_mode"],
+        "properties": { "run_mode": { "const": "VERIFY" } }
+      },
+      "then": {
+        "properties": {
+          "repair_rounds": { "const": 0 },
+          "repair_actions": { "maxItems": 0 },
+          "stop_reason": { "type": "null" },
+          "initial_verdicts": { "maxItems": 0 },
+          "heal_progress_calibrator_id": { "type": "null" },
+          "heal_progress_calibrator_revision": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["run_mode"],
+        "properties": { "run_mode": { "const": "HEAL" } }
+      },
+      "then": {
+        "properties": {
+          "stop_reason": { "type": "string", "minLength": 1 },
+          "initial_verdicts": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["calibrator_id"],
+        "properties": { "calibrator_id": { "type": "string" } }
+      },
+      "then": {
+        "required": ["calibrator_revision"],
+        "properties": { "calibrator_revision": { "type": "string", "minLength": 1 } }
+      }
+    },
+    {
+      "if": {
+        "required": ["calibrator_revision"],
+        "properties": { "calibrator_revision": { "type": "string" } }
+      },
+      "then": {
+        "required": ["calibrator_id"],
+        "properties": { "calibrator_id": { "type": "string", "minLength": 1 } }
+      }
+    },
+    {
+      "if": {
+        "required": ["calibrator_id"],
+        "properties": { "calibrator_id": { "type": "null" } }
+      },
+      "then": {
+        "required": ["calibrator_revision"],
+        "properties": { "calibrator_revision": { "type": "null" } }
+      }
+    },
+    {
+      "if": {
+        "required": ["calibrator_revision"],
+        "properties": { "calibrator_revision": { "type": "null" } }
+      },
+      "then": {
+        "required": ["calibrator_id"],
+        "properties": { "calibrator_id": { "type": "null" } }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verdicts": {
+            "contains": {
+              "required": ["calibrated_confidence"],
+              "properties": {
+                "calibrated_confidence": { "type": "number" }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": ["calibrator_id", "calibrator_revision"],
+        "properties": {
+          "calibrator_id": { "type": "string", "minLength": 1 },
+          "calibrator_revision": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "verificationState": {
+      "type": "string",
+      "enum": [
+        "SUPPORTED",
+        "CONTRADICTED",
+        "INSUFFICIENT_EVIDENCE",
+        "CONFLICTING_EVIDENCE",
+        "NOT_CHECKABLE"
+      ],
+      "description": "INSUFFICIENT_EVIDENCE means the given chunks did not settle the claim -- it is not a real-world falsity judgement."
+    },
+    "edgeVerificationState": {
+      "type": "string",
+      "enum": ["SUPPORTED", "CONTRADICTED", "INSUFFICIENT_EVIDENCE"],
+      "description": "A single claim-evidence edge cannot be NOT_CHECKABLE (that is a whole-claim classification made before evidence is sought) or CONFLICTING_EVIDENCE (which only emerges from comparing multiple edges)."
+    },
+    "atomicClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "text", "start_char", "end_char"],
+      "properties": {
+        "claim_id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "start_char": { "type": "integer", "minimum": 0 },
+        "end_char": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "evidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chunk_id", "start_char", "end_char", "relevance_score"],
+      "properties": {
+        "chunk_id": { "type": "string", "minLength": 1 },
+        "start_char": { "type": ["integer", "null"], "minimum": 0 },
+        "end_char": { "type": ["integer", "null"], "minimum": 0 },
+        "relevance_score": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "start_char": { "type": "null" },
+            "end_char": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "start_char": { "type": "integer" },
+            "end_char": { "type": "integer" }
+          }
+        }
+      ],
+      "description": "start_char/end_char must be both null (whole-chunk reference) or both present (a span) -- never just one. end_char > start_char is a numeric comparison this schema cannot express; see semantic_validation."
+    },
+    "labelScores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported", "contradicted", "insufficient", "score_kind"],
+      "properties": {
+        "supported": { "type": "number" },
+        "contradicted": { "type": "number" },
+        "insufficient": { "type": "number" },
+        "score_kind": { "type": "string", "minLength": 1 }
+      },
+      "description": "Full three-way raw NLI-style score (entailment/contradiction/neutral), not just the winning label's scalar."
+    },
+    "evidenceAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "label_scores",
+        "state",
+        "rationale",
+        "verifier_id",
+        "verifier_revision"
+      ],
+      "properties": {
+        "reference": { "$ref": "#/$defs/evidenceReference" },
+        "label_scores": { "$ref": "#/$defs/labelScores" },
+        "state": { "$ref": "#/$defs/edgeVerificationState" },
+        "rationale": { "type": ["string", "null"] },
+        "verifier_id": { "type": "string", "minLength": 1 },
+        "verifier_revision": { "type": "string", "minLength": 1 }
+      }
+    },
+    "claimVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim",
+        "state",
+        "evidence_assessments",
+        "raw_score",
+        "calibrated_confidence",
+        "rationale"
+      ],
+      "properties": {
+        "claim": { "$ref": "#/$defs/atomicClaim" },
+        "state": { "$ref": "#/$defs/verificationState" },
+        "evidence_assessments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidenceAssessment" }
+        },
+        "raw_score": {
+          "type": ["number", "null"],
+          "description": "Verifier-specific raw score, not a calibrated probability."
+        },
+        "calibrated_confidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rationale": { "type": ["string", "null"] }
+      },
+      "description": "Duplicate-edge detection (same chunk_id/span/verifier_id/verifier_revision) cannot be expressed here; see semantic_validation.",
+      "allOf": [
+        {
+          "if": {
+            "required": ["state"],
+            "properties": { "state": { "const": "NOT_CHECKABLE" } }
+          },
+          "then": {
+            "properties": { "evidence_assessments": { "maxItems": 0 } }
+          }
+        },
+        {
+          "if": {
+            "required": ["state"],
+            "properties": { "state": { "const": "INSUFFICIENT_EVIDENCE" } }
+          },
+          "then": {
+            "properties": {
+              "evidence_assessments": {
+                "items": {
+                  "properties": {
+                    "state": { "const": "INSUFFICIENT_EVIDENCE" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["state"],
+            "properties": { "state": { "const": "SUPPORTED" } }
+          },
+          "then": {
+            "properties": {
+              "evidence_assessments": {
+                "contains": { "properties": { "state": { "const": "SUPPORTED" } } },
+                "not": {
+                  "contains": { "properties": { "state": { "const": "CONTRADICTED" } } }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["state"],
+            "properties": { "state": { "const": "CONTRADICTED" } }
+          },
+          "then": {
+            "properties": {
+              "evidence_assessments": {
+                "contains": { "properties": { "state": { "const": "CONTRADICTED" } } },
+                "not": {
+                  "contains": { "properties": { "state": { "const": "SUPPORTED" } } }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["state"],
+            "properties": { "state": { "const": "CONFLICTING_EVIDENCE" } }
+          },
+          "then": {
+            "properties": {
+              "evidence_assessments": {
+                "allOf": [
+                  { "contains": { "properties": { "state": { "const": "SUPPORTED" } } } },
+                  { "contains": { "properties": { "state": { "const": "CONTRADICTED" } } } }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "repairActionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "round",
+        "claim_id",
+        "action",
+        "state_before",
+        "state_after",
+        "claim_id_after",
+        "claim_text_before",
+        "claim_text_after",
+        "committed",
+        "note",
+        "evidence_ids_added",
+        "evidence_ids_removed",
+        "answer_hash_before",
+        "answer_hash_after",
+        "calibrated_confidence_before",
+        "calibrated_confidence_after",
+        "elapsed_ms",
+        "estimated_cost",
+        "failure_or_stop_reason"
+      ],
+      "properties": {
+        "round": { "type": "integer", "minimum": 1 },
+        "claim_id": { "type": "string", "minLength": 1 },
+        "action": {
+          "type": "string",
+          "enum": ["retrieve", "rewrite", "delete", "abstain", "accept"]
+        },
+        "state_before": { "$ref": "#/$defs/verificationState" },
+        "state_after": {
+          "anyOf": [
+            { "$ref": "#/$defs/verificationState" },
+            { "type": "null" }
+          ]
+        },
+        "claim_id_after": { "type": ["string", "null"], "minLength": 1 },
+        "claim_text_before": { "type": ["string", "null"], "minLength": 1 },
+        "claim_text_after": { "type": ["string", "null"], "minLength": 1 },
+        "committed": { "type": "boolean" },
+        "note": { "type": ["string", "null"] },
+        "evidence_ids_added": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "evidence_ids_removed": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "answer_hash_before": { "type": ["string", "null"] },
+        "answer_hash_after": { "type": ["string", "null"] },
+        "calibrated_confidence_before": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "For HEAL, independently calibrated P(claim grounded/supported), not verdict-correctness confidence or a raw model score."
+        },
+        "calibrated_confidence_after": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "elapsed_ms": { "type": ["number", "null"], "minimum": 0 },
+        "estimated_cost": { "type": ["number", "null"], "minimum": 0 },
+        "failure_or_stop_reason": { "type": ["string", "null"] }
+      },
+      "description": "Cross-object lineage, delete/null and progress-calibrator invariants are checked by semantic_validation."
+    },
+    "runMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_latency_ms",
+        "stage_latencies_ms",
+        "model_call_count",
+        "input_tokens",
+        "output_tokens",
+        "estimated_cost"
+      ],
+      "properties": {
+        "total_latency_ms": { "type": ["number", "null"], "minimum": 0 },
+        "stage_latencies_ms": {
+          "type": ["object", "null"],
+          "additionalProperties": { "type": "number", "minimum": 0 }
+        },
+        "model_call_count": { "type": ["integer", "null"], "minimum": 0 },
+        "input_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "output_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "estimated_cost": { "type": ["number", "null"], "minimum": 0 }
+      },
+      "description": "Every field may be unset (null/not yet collected), but a provided value must be non-negative and finite."
+    }
+  }
+}
