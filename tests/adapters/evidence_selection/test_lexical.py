@@ -1,6 +1,7 @@
 import math
 
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from groundguard_rag.adapters.decomposition import RuleBasedClaimDecomposer
 from groundguard_rag.adapters.evidence_selection import (
@@ -20,6 +21,15 @@ from groundguard_rag.domain.models import (
     VerificationRequest,
 )
 from groundguard_rag.domain.ports import Verifier
+
+
+_NONEMPTY_TEXT = st.text(
+    alphabet=st.sampled_from(
+        tuple("abcdefghijklmnopqrstuvwxyz0123456789 巴黎法国日本东京。！？;\n")
+    ),
+    min_size=1,
+    max_size=100,
+).filter(lambda value: bool(value.strip()))
 
 
 def _claim(text="Paris is the capital of France."):
@@ -142,6 +152,49 @@ def test_selection_is_deterministic():
     selector = LexicalEvidenceSelector()
 
     assert selector.select(claim, chunks) == selector.select(claim, list(chunks))
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    claim_text=_NONEMPTY_TEXT,
+    chunk_texts=st.lists(_NONEMPTY_TEXT, min_size=0, max_size=12),
+    top_k=st.integers(min_value=1, max_value=8),
+    min_score=st.floats(
+        min_value=0.0,
+        max_value=1.0,
+        allow_nan=False,
+        allow_infinity=False,
+    ),
+)
+def test_property_scores_are_bounded_ranked_deterministic_and_top_k_limited(
+    claim_text, chunk_texts, top_k, min_score
+):
+    """Check selector invariants independently of any semantic gold label."""
+
+    claim = _claim(claim_text)
+    chunks = [_chunk(f"chunk-{index}", text) for index, text in enumerate(chunk_texts)]
+    original_chunks = list(chunks)
+    selector = LexicalEvidenceSelector(
+        LexicalSelectorConfig(top_k=top_k, min_score=min_score)
+    )
+
+    references = selector.select(claim, chunks)
+    scores = [reference.relevance_score for reference in references]
+
+    assert len(references) <= min(top_k, len(chunks))
+    assert len({reference.chunk_id for reference in references}) == len(references)
+    assert {reference.chunk_id for reference in references} <= {
+        chunk.chunk_id for chunk in chunks
+    }
+    assert all(
+        score is not None
+        and math.isfinite(score)
+        and min_score <= score <= 1.0
+        for score in scores
+    )
+    assert scores == sorted(scores, reverse=True)
+    assert chunks == original_chunks
+    assert selector.select(claim, list(chunks)) == references
 
 
 def test_selector_does_not_mutate_chunk_list_or_nested_metadata():

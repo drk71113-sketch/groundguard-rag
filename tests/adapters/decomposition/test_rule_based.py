@@ -1,4 +1,5 @@
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from groundguard_rag.adapters.decomposition import RuleBasedClaimDecomposer
 from groundguard_rag.application.verify_service import VerifyService
@@ -7,6 +8,13 @@ from groundguard_rag.domain.enums import VerificationState
 from groundguard_rag.domain.exceptions import DomainValidationError
 from groundguard_rag.domain.models import ClaimVerdict, VerificationRequest
 from groundguard_rag.domain.ports import EvidenceSelector, Verifier
+
+
+_NONEMPTY_TEXT = st.text(
+    alphabet=st.characters(blacklist_categories=("Cs",)),
+    min_size=1,
+    max_size=200,
+).filter(lambda value: bool(value.strip()))
 
 
 def _texts(claims):
@@ -113,6 +121,25 @@ def test_ids_and_spans_are_deterministic():
 
     assert first == second
     assert [claim.claim_id for claim in first] == ["claim-0-6", "claim-7-14"]
+
+
+@settings(max_examples=100, deadline=None)
+@given(answer=_NONEMPTY_TEXT)
+def test_property_claim_spans_are_exact_ordered_unique_and_deterministic(answer):
+    """Exercise span invariants over varied Unicode, punctuation, and spacing."""
+
+    decomposer = RuleBasedClaimDecomposer()
+    claims = decomposer.decompose(answer)
+
+    assert claims
+    assert all(answer[claim.start_char : claim.end_char] == claim.text for claim in claims)
+    assert all(claim.text == claim.text.strip() for claim in claims)
+    assert all(
+        previous.end_char <= current.start_char
+        for previous, current in zip(claims, claims[1:])
+    )
+    assert len({claim.claim_id for claim in claims}) == len(claims)
+    assert decomposer.decompose(answer) == claims
 
 
 @pytest.mark.parametrize("answer", ["", "   ", "\r\n\t", None, 42])

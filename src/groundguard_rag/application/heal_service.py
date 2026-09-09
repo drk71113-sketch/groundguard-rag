@@ -21,7 +21,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Callable, Mapping
 
-from groundguard_rag.application.exceptions import AdapterContractError
+from groundguard_rag.application.exceptions import (
+    AdapterContractError,
+    ApplicationInvariantError,
+)
 from groundguard_rag.application.input_hashing import (
     compute_answer_hash,
     compute_input_hash,
@@ -156,6 +159,11 @@ class HealService:
     ``StopPolicy`` may only stop earlier. A monotonic clock is injected so
     timeout behavior is deterministic in tests; adapter calls are cooperative
     boundaries and must still configure their own provider-level timeouts.
+
+    Per-run mutable state is local to ``heal``. Reusing one service instance
+    concurrently therefore does not introduce cross-call state here, but the
+    injected verify service, adapters, and clock must themselves be reentrant
+    or thread-safe. This service deliberately does not serialize provider calls.
     """
 
     def __init__(
@@ -421,6 +429,10 @@ class HealService:
                         stable_ids=stable_ids,
                     )
                 )
+            except ApplicationInvariantError:
+                # An orchestration invariant indicates a code defect, not an
+                # adapter failure. Do not mislabel or hide it in an audit row.
+                raise
             except AdapterContractError as exc:
                 actions.append(
                     self._failed_record(
@@ -615,7 +627,11 @@ class HealService:
                 break
 
             if decision.action in {RepairAction.RETRIEVE, RepairAction.REWRITE}:
-                assert after_progress is not None  # validated float from evaluator
+                if after_progress is None:
+                    raise ApplicationInvariantError(
+                        "HealService expected after_progress for a verified "
+                        "RETRIEVE/REWRITE candidate"
+                    )
                 if after_progress - before_progress < self._config.min_improvement:
                     actions.append(
                         self._record(
@@ -665,7 +681,10 @@ class HealService:
                 )
             )
 
-        assert stop_reason is not None
+        if stop_reason is None:
+            raise ApplicationInvariantError(
+                "HealService loop exited without selecting a stop reason"
+            )
         return self._finish(
             original_request=request,
             current_request=current_request,
@@ -690,9 +709,15 @@ class HealService:
     ) -> tuple[VerificationRequest, tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
         target_index = stable_ids.index(target.claim.claim_id)
         if decision.action is RepairAction.RETRIEVE:
-            assert self._retriever is not None
+            if self._retriever is None:
+                raise ApplicationInvariantError(
+                    "HealService entered RETRIEVE without an injected retriever"
+                )
             base_query = current_request.query
-            assert base_query is not None and base_query.strip()
+            if base_query is None or not base_query.strip():
+                raise ApplicationInvariantError(
+                    "HealService entered RETRIEVE without a non-empty query"
+                )
             query = decision.retrieval_query or f"{base_query.strip()}\n{target.claim.text}"
             chunks = self._retriever.retrieve(query)
             if not isinstance(chunks, list):
@@ -725,7 +750,10 @@ class HealService:
             )
 
         if decision.action is RepairAction.REWRITE:
-            assert self._rewriter is not None
+            if self._rewriter is None:
+                raise ApplicationInvariantError(
+                    "HealService entered REWRITE without an injected rewriter"
+                )
             chunks_by_id = {chunk.chunk_id: chunk for chunk in current_request.chunks}
             candidates = [
                 EvidenceCandidate.from_chunk(

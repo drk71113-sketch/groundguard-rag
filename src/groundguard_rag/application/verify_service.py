@@ -65,6 +65,11 @@ class VerifyService:
     callable returning a timezone-aware ISO-8601 string) instead of this
     class calling a system clock internally, so tests can produce a fixed,
     deterministic ``AuditReport.created_at``.
+
+    Per-run mutable state is local to ``verify``. Reusing one service instance
+    concurrently therefore does not introduce cross-call state here, but the
+    injected decomposer, selector, verifier, calibrator, and clock must
+    themselves be reentrant or thread-safe. This service adds no provider lock.
     """
 
     def __init__(

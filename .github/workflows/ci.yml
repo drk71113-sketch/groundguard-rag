@@ -26,7 +26,7 @@ jobs:
       - name: Check dependencies
         run: uv pip check
       - name: Lint correctness rules
-        run: uv run ruff check src tests examples
+        run: uv run ruff check src tests examples demo_rag
       - name: Test with branch coverage
         run: uv run python -m pytest -q -W error --cov=groundguard_rag --cov-branch --cov-report=term-missing
       - name: Run local integration demo

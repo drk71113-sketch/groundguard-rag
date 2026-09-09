@@ -5,6 +5,15 @@ from __future__ import annotations
 from groundguard_rag.domain.exceptions import GroundGuardError
 
 
+class ApplicationInvariantError(GroundGuardError):
+    """The application service reached an internally inconsistent state.
+
+    Unlike ``AdapterContractError``, this exception does not blame an injected
+    adapter's returned value. It protects orchestration invariants explicitly
+    so they remain enforced when Python runs with optimization enabled.
+    """
+
+
 class AdapterContractError(GroundGuardError):
     """An injected adapter's *return value* violated its port contract.
 

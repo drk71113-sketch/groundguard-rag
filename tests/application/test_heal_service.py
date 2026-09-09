@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
+import pytest
 
 from groundguard_rag.adapters.decomposition.rule_based import RuleBasedClaimDecomposer
+from groundguard_rag.application.exceptions import ApplicationInvariantError
 from groundguard_rag.application.heal_service import HealResult, HealService
 from groundguard_rag.application.input_hashing import compute_input_hash
 from groundguard_rag.application.verify_service import VerifyService
@@ -105,6 +110,17 @@ class _QueuePolicy(RepairPolicy):
     def decide(self, verdict, state):
         self.states.append(state)
         return self.decisions.popleft()
+
+
+class _BarrierAcceptPolicy(RepairPolicy):
+    """A reentrant test double that forces heal calls to overlap."""
+
+    def __init__(self, parties):
+        self._barrier = Barrier(parties)
+
+    def decide(self, verdict, state):
+        self._barrier.wait(timeout=10)
+        return RepairDecision(action=RepairAction.ACCEPT, estimated_cost=0.0)
 
 
 class _NeverStop(StopPolicy):
@@ -609,3 +625,89 @@ def test_result_hash_report_semantics_and_input_immutability_hold():
     validate_audit_report_semantics(result.audit_report.to_dict())
     assert request.answer == "Unverified."
     assert request.chunks is original_chunks
+
+
+def _initial_target(service, request):
+    report = service.verify_service.verify(request)
+    return report.verdicts[0], tuple(
+        verdict.claim.claim_id for verdict in report.verdicts
+    )
+
+
+def test_retrieve_internal_guard_raises_explicitly_without_retriever():
+    service = _service(_QueuePolicy())
+    request = _request()
+    target, stable_ids = _initial_target(service, request)
+
+    with pytest.raises(ApplicationInvariantError, match="retriever"):
+        service._build_candidate(
+            decision=_decision(RepairAction.RETRIEVE),
+            target=target,
+            current_request=request,
+            stable_ids=stable_ids,
+        )
+
+
+def test_retrieve_internal_guard_raises_explicitly_without_query():
+    retriever = _StaticRetriever([])
+    service = _service(_QueuePolicy(), retriever=retriever)
+    request = _request(query=None)
+    target, stable_ids = _initial_target(service, request)
+
+    with pytest.raises(ApplicationInvariantError, match="query"):
+        service._build_candidate(
+            decision=_decision(RepairAction.RETRIEVE),
+            target=target,
+            current_request=request,
+            stable_ids=stable_ids,
+        )
+    assert retriever.calls == []
+
+
+def test_rewrite_internal_guard_raises_explicitly_without_rewriter():
+    service = _service(_QueuePolicy())
+    request = _request()
+    target, stable_ids = _initial_target(service, request)
+
+    with pytest.raises(ApplicationInvariantError, match="rewriter"):
+        service._build_candidate(
+            decision=_decision(RepairAction.REWRITE),
+            target=target,
+            current_request=request,
+            stable_ids=stable_ids,
+        )
+
+
+def test_internal_invariant_is_not_misclassified_as_an_adapter_failure(monkeypatch):
+    service = _service(_QueuePolicy(_decision(RepairAction.RETRIEVE)))
+    monkeypatch.setattr(service, "_action_is_available", lambda action, request: True)
+
+    with pytest.raises(ApplicationInvariantError, match="retriever"):
+        service.heal(_request())
+
+
+def test_same_heal_service_instance_is_reentrant_with_thread_safe_adapters():
+    parties = 8
+    service = _service(_BarrierAcceptPolicy(parties), clock=lambda: 0.0)
+    requests = tuple(
+        VerificationRequest(
+            request_id=f"heal-concurrent-{index}",
+            answer=f"Unverified claim {index}.",
+            chunks=(Chunk(chunk_id=f"seed-{index}", text="background"),),
+            query="original question",
+        )
+        for index in range(parties)
+    )
+
+    with ThreadPoolExecutor(max_workers=parties) as executor:
+        results = tuple(executor.map(service.heal, requests))
+
+    assert [result.audit_report.request_id for result in results] == [
+        request.request_id for request in requests
+    ]
+    assert [result.candidate_answer for result in results] == [
+        request.answer for request in requests
+    ]
+    assert all(result.audit_report.stop_reason == "all_claims_handled" for result in results)
+    assert all(len(result.audit_report.repair_actions) == 1 for result in results)
+    assert all(result.audit_report.repair_actions[0].committed for result in results)

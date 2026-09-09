@@ -1,10 +1,13 @@
 import inspect
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
+from groundguard_rag.adapters.decomposition import RuleBasedClaimDecomposer
 from groundguard_rag.application.exceptions import AdapterContractError
 from groundguard_rag.application.verify_service import VerifyService
 from groundguard_rag.domain.config import VerifyConfig
@@ -657,3 +660,58 @@ def test_constructor_has_no_external_or_heal_dependencies():
         "vector_store",
     }
     assert parameter_names.isdisjoint(forbidden)
+
+
+class _ConcurrentEmptySelector(EvidenceSelector):
+    def select(self, claim, chunks):
+        return []
+
+
+class _BarrierNotCheckableVerifier(Verifier):
+    """A reentrant test double that forces verify calls to overlap."""
+
+    def __init__(self, parties):
+        self._barrier = Barrier(parties)
+
+    def verify(self, claim, evidence):
+        self._barrier.wait(timeout=10)
+        return ClaimVerdict(
+            claim=claim,
+            state=VerificationState.NOT_CHECKABLE,
+            evidence_assessments=(),
+        )
+
+
+def test_same_verify_service_instance_is_reentrant_with_thread_safe_adapters():
+    parties = 8
+    service = VerifyService(
+        decomposer=RuleBasedClaimDecomposer(),
+        selector=_ConcurrentEmptySelector(),
+        verifier=_BarrierNotCheckableVerifier(parties),
+        config=VerifyConfig(),
+        model_revision="concurrency-test-v1",
+        threshold_version="concurrency-test-v1",
+        clock=lambda: FIXED_TIME,
+    )
+    requests = tuple(
+        VerificationRequest(
+            request_id=f"concurrent-{index}",
+            answer=f"Claim number {index}.",
+            chunks=(),
+        )
+        for index in range(parties)
+    )
+
+    with ThreadPoolExecutor(max_workers=parties) as executor:
+        reports = tuple(executor.map(service.verify, requests))
+
+    assert [report.request_id for report in reports] == [
+        request.request_id for request in requests
+    ]
+    assert [report.verdicts[0].claim.text for report in reports] == [
+        request.answer for request in requests
+    ]
+    assert all(
+        report.verdicts[0].state is VerificationState.NOT_CHECKABLE
+        for report in reports
+    )

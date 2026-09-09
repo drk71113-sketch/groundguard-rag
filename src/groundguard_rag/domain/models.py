@@ -1329,6 +1329,11 @@ class AuditReport:
                     f"AuditReport.repair_actions entry references claim_id "
                     f"{action.claim_id!r}, which is not present in initial or final verdicts"
                 )
+            # This model checks report-level referential integrity only.
+            # HealService._stabilize_claim_ids/_validate_candidate_shape
+            # additionally prove that a committed rewrite resolves in the
+            # verified final candidate. A foreign producer must establish
+            # that workflow lineage before constructing this report.
             if (
                 action.claim_id_after is not None
                 and action.claim_id_after not in claim_ids | initial_claim_ids

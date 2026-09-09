@@ -17,6 +17,7 @@ from groundguard_rag.domain.models import (
     RepairActionRecord,
     RunMetrics,
 )
+from groundguard_rag.schema.semantic_validation import validate_audit_report_semantics
 
 SCHEMA_PATH = (
     Path(__file__).parent.parent
@@ -437,8 +438,6 @@ def test_schema_alone_does_not_catch_repair_action_referencing_unknown_claim(sch
 def test_to_dict_passes_schema_format_checker_and_semantic_validator(schema):
     # A single AuditReport.to_dict() output must satisfy all three layers
     # of validation at once.
-    from groundguard_rag.schema.semantic_validation import validate_audit_report_semantics
-
     payload = _sample_report(
         run_mode=RunMode.HEAL,
         repair_rounds=1,
@@ -459,3 +458,103 @@ def test_to_dict_passes_schema_format_checker_and_semantic_validator(schema):
     ).to_dict()
     _validate(payload, schema)
     validate_audit_report_semantics(payload)
+
+
+def _verdict_for_state(
+    claim_id: str,
+    text: str,
+    start_char: int,
+    state: VerificationState,
+) -> ClaimVerdict:
+    claim = AtomicClaim(
+        claim_id=claim_id,
+        text=text,
+        start_char=start_char,
+        end_char=start_char + len(text),
+    )
+    if state is VerificationState.NOT_CHECKABLE:
+        assessments = ()
+    elif state is VerificationState.CONFLICTING_EVIDENCE:
+        assessments = (
+            _assessment(VerificationState.SUPPORTED, chunk_id=f"{claim_id}-support"),
+            _assessment(
+                VerificationState.CONTRADICTED,
+                chunk_id=f"{claim_id}-contradiction",
+            ),
+        )
+    else:
+        assessments = (
+            _assessment(state, chunk_id=f"{claim_id}-evidence"),
+        )
+    return ClaimVerdict(
+        claim=claim,
+        state=state,
+        evidence_assessments=assessments,
+    )
+
+
+def test_heal_all_five_states_and_committed_delete_round_trip_all_validators(schema):
+    """Lock the richest HEAL payload across dataclass, JSON, and semantic layers."""
+
+    specs = (
+        ("supported", "Supported.", VerificationState.SUPPORTED),
+        ("contradicted", "Contradicted.", VerificationState.CONTRADICTED),
+        (
+            "insufficient",
+            "Insufficient.",
+            VerificationState.INSUFFICIENT_EVIDENCE,
+        ),
+        (
+            "conflicting",
+            "Conflicting.",
+            VerificationState.CONFLICTING_EVIDENCE,
+        ),
+        ("not-checkable", "Please continue.", VerificationState.NOT_CHECKABLE),
+    )
+    offset = 0
+    final_verdicts = []
+    for claim_id, text, state in specs:
+        final_verdicts.append(_verdict_for_state(claim_id, text, offset, state))
+        offset += len(text) + 1
+    deleted = _verdict_for_state(
+        "deleted",
+        "Delete this.",
+        offset,
+        VerificationState.INSUFFICIENT_EVIDENCE,
+    )
+    report = AuditReport(
+        schema_version=SCHEMA_VERSION,
+        request_id="heal-five-states-delete",
+        input_hash="sha256:test-input",
+        model_revision="verifier-v1",
+        threshold_version="thresholds-v1",
+        created_at="2026-09-08T00:00:00+00:00",
+        run_mode=RunMode.HEAL,
+        verdicts=tuple(final_verdicts),
+        initial_verdicts=tuple(final_verdicts) + (deleted,),
+        repair_rounds=1,
+        repair_actions=(
+            RepairActionRecord(
+                round=1,
+                claim_id=deleted.claim.claim_id,
+                action=RepairAction.DELETE,
+                state_before=deleted.state,
+                state_after=None,
+                claim_id_after=None,
+                claim_text_before=deleted.claim.text,
+                claim_text_after=None,
+                committed=True,
+            ),
+        ),
+        stop_reason="all_claims_handled",
+    )
+
+    payload = json.loads(json.dumps(report.to_dict()))
+
+    _validate(payload, schema)
+    validate_audit_report_semantics(payload)
+    assert {verdict["state"] for verdict in payload["verdicts"]} == {
+        state.value for state in VerificationState
+    }
+    assert payload["repair_actions"][0]["action"] == RepairAction.DELETE.value
+    assert payload["repair_actions"][0]["committed"] is True

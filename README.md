@@ -1,5 +1,7 @@
 # GroundGuard-RAG
 
+[![CI](https://github.com/drk71113-sketch/groundguard-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/drk71113-sketch/groundguard-rag/actions/workflows/ci.yml)
+
 GroundGuard-RAG is a Python middleware library for checking a generated RAG
 answer against the chunks supplied by its caller.  It decomposes the answer
 into claims, records claim-evidence edges, produces a versioned audit report,
@@ -207,7 +209,7 @@ timeouts, credentials, and provider policies remain the host's responsibility.
 ```powershell
 python -m pytest -q -W error
 python -m pytest -q -W error --cov=groundguard_rag --cov-branch --cov-report=term-missing
-ruff check src tests examples
+ruff check src tests examples demo_rag
 python -m pip check
 ```
 

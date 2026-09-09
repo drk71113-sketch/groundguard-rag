@@ -77,7 +77,7 @@ python -m pip install uv
 uv sync --locked --extra test --extra mcp
 uv run python -m pytest -q -W error
 uv run python -m pytest -q -W error --cov=groundguard_rag --cov-branch --cov-report=term-missing
-uv run ruff check src tests examples
+uv run ruff check src tests examples demo_rag
 uv pip check
 uv run python examples/quickstart_local.py
 uv run python -m groundguard_rag.evaluation.cli --factory examples.demo_factory:build_groundguard --dataset examples/sample_benchmark.jsonl
