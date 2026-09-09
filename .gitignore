@@ -26,3 +26,9 @@ model*.onnx
 
 # RAGTruth source data is downloaded locally; keep only its license/source note.
 demo_rag/data/raw/ragtruth/*.jsonl
+
+# Local documents and evaluation inputs may contain private or licensed data.
+demo_rag/data/documents/*
+!demo_rag/data/documents/README.md
+demo_rag/data/evaluation/*
+!demo_rag/data/evaluation/README.md
