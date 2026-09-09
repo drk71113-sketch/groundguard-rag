@@ -36,4 +36,5 @@
 - P1-4：已增加同一 `VerifyService`、`HealService` 实例在八线程重叠调用下的无串扰回归；文档明确 adapter/clock 的线程安全仍由注入方负责。
 - P2：已补充 `AuditReport` 与 `HealService` 的血缘校验职责注释，以及 HEAL 五态 + committed DELETE 的 dataclass → JSON → JSON Schema → 语义校验组合测试。聚合耗时进一步拆分和中文缩写启发式属于后续功能优化，本轮未改变现有行为。
 - 最终本机验收：`831 passed, 1 skipped`；多次 property-based 回归的 branch coverage 为 `88.94%–88.99%`（门槛 `85%`）；Ruff、`uv lock --check`、`uv pip check`、compileall、本地 demo、评测、wheel 构建与 wheel 内容核对均通过。
-- 发布边界：未创建 commit、未 push、未发布 PyPI；软件许可证仍待项目方决定。
+- 发布边界：本轮审查修复已于 2026-09-09 经用户授权提交并推送到公开 GitHub 仓库；未发布 PyPI，软件许可证仍待项目方决定。
+- 公开仓库后续硬化：首次公开 CI 全部通过，但 GitHub 标注 Node 20 Action 弃用警告；已依据官方 2026-07 最新稳定版本将 `actions/checkout` 与 `actions/setup-python` 一并升级为 `v7`，并要求再次通过完整 CI。
